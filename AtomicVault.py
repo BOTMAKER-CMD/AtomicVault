@@ -8,6 +8,22 @@ import os
 from datetime import timedelta
 from dotenv import load_dotenv
 from server import keep_alive
+import requests
+import threading
+
+PING_URL = "https://hc-ping.com/6513e8e8-67ba-4334-ad98-6bde29cb921c"
+
+def ping_healthchecks():
+    while True:
+        try:
+            requests.get(PING_URL)
+            print("🏓 Pinged Healthchecks")
+        except Exception as e:
+            print(f"⚠️ Healthchecks ping failed: {e}")
+        time.sleep(300)  # 300 seconds = every 5 minutes
+
+threading.Thread(target=ping_healthchecks, daemon=True).start()
+
 
 # ─── KEEP ALIVE (for Replit) ────────────────────────────
 keep_alive()
