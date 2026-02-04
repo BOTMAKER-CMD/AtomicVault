@@ -126,14 +126,14 @@ async def afk(ctx, *, reason="AFK"):
     await ctx.send(f"💤 **AFK set:** {reason}", delete_after=6)
 
 # ─── SLASH COMMANDS ─────────────────────────────────────
-@tree.command(name="ping")
+@tree.command(name="ping", description="Check if bot is alive or not")
 async def slash_ping(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"🏓 Pong `{round(bot.latency * 1000)}ms`",
         ephemeral=True
     )
 
-@tree.command(name="vouch")
+@tree.command(name="vouch", description="vouch a user with reason")
 @app_commands.describe(user="User to vouch", message="Vouch message")
 async def vouch(interaction: discord.Interaction, user: discord.Member, message: str):
 
@@ -167,7 +167,7 @@ async def vouch(interaction: discord.Interaction, user: discord.Member, message:
 
     await interaction.response.send_message("✅ Vouch sent!", ephemeral=True)
 
-@tree.command(name="ban")
+@tree.command(name="ban", description="bans a user")
 @app_commands.checks.has_permissions(ban_members=True)
 async def ban(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason"):
     if member.id == interaction.user.id:
@@ -177,13 +177,13 @@ async def ban(interaction: discord.Interaction, member: discord.Member, reason: 
     await member.ban(reason=reason)
     await interaction.response.send_message(f"🔨 {member} banned.")
 
-@tree.command(name="kick")
+@tree.command(name="kick", description="kick a member")
 @app_commands.checks.has_permissions(kick_members=True)
 async def kick(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason"):
     await member.kick(reason=reason)
     await interaction.response.send_message(f"👢 {member} kicked.")
 
-@tree.command(name="mute")
+@tree.command(name="mute", description="time out someone")
 @app_commands.checks.has_permissions(moderate_members=True)
 async def mute(interaction: discord.Interaction, member: discord.Member, duration: str, reason: str = "No reason"):
     delta = parse_duration(duration)
@@ -194,13 +194,13 @@ async def mute(interaction: discord.Interaction, member: discord.Member, duratio
     await member.timeout(delta, reason=reason)
     await interaction.response.send_message(f"🔇 {member} muted for {duration}")
 
-@tree.command(name="unmute")
+@tree.command(name="unmute", description="Remove timeout from someone")
 @app_commands.checks.has_permissions(moderate_members=True)
 async def unmute(interaction: discord.Interaction, member: discord.Member):
     await member.timeout(None)
     await interaction.response.send_message(f"🔊 {member} unmuted")
 
-@tree.command(name="afk")
+@tree.command(name="afk", description="Set afk")
 async def afk_slash(interaction: discord.Interaction, reason: str = "AFK"):
     afk_users[interaction.user.id] = {
         "reason": reason,
