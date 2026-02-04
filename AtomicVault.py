@@ -220,6 +220,13 @@ async def unban(
     embed = discord.Embed(
         title="✅ User Unbanned",
         color=0x2bff88
+    )
+    embed.add_field(name="User", value=f"{user} (`{user.id}`)", inline=False)
+    embed.add_field(name="By", value=interaction.user.mention, inline=False)
+    embed.add_field(name="Reason", value=reason, inline=False)
+    embed.set_footer(text="Atomic Vault • Moderation")
+
+    await interaction.response.send_message(embed=embed)
 
 
 # ─── ERROR HANDLING ─────────────────────────────────────
@@ -231,6 +238,16 @@ async def on_command_error(ctx, error):
         return
     else:
         print(error)
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message(
+            "❌ You don’t have permission to use this command.",
+            ephemeral=True
+        )
+    else:
+        raise error
+
 
 # ─── RUN ────────────────────────────────────────────────
 bot.run(TOKEN)
