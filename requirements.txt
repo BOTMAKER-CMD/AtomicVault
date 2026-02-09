@@ -1,9 +1,3 @@
-discord.py==2.4.0
-python-dotenv
-flask
-<<<<<<< HEAD
 discord.py
 python-dotenv
-=======
-requests
->>>>>>> d7fc87a (healthcheck.io addition)
+flask
