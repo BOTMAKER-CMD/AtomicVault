@@ -405,5 +405,23 @@ async def my_service(interaction: discord.Interaction):
     
     embed.set_footer(text="Keep these codes confidential. Click to reveal.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
+@bot.command(name="cancel_service")
+async def cancel_service(ctx, service_id: str = None):
+    if service_id is None:
+        await ctx.send("❌ Please provide the **Service ID** you want to cancel.")
+        return
+
+    # 1. Add your logic here to check if the service exists in your database/list
+    # 2. Logic to stop the specific process/API call
+    
+    # Example Response:
+    embed = discord.Embed(
+        title="Service Cancelled",
+        description=f"Successfully terminated service: **{service_id}**",
+        color=discord.Color.red()
+    )
+    embed.set_footer(text=f"Requested by {ctx.author.name}")
+    
+    await ctx.send(embed=embed)
 keep_alive()
 bot.run(TOKEN)
