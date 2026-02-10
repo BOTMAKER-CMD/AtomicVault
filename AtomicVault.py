@@ -406,5 +406,69 @@ async def my_service(interaction: discord.Interaction):
     
     embed.set_footer(text="Keep these codes confidential. Click to reveal.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
+@tree.command(name="help", description="Access the Atomic Vault command directory")
+async def help_command(interaction: discord.Interaction):
+    # Check if user is in your CORE_TEAM
+    is_staff = interaction.user.id in CORE_TEAM
+    # Check if user has admin/mod permissions for the Mod section
+    is_admin = interaction.user.guild_permissions.administrator
+    is_mod = interaction.user.guild_permissions.moderate_members
+
+    embed = discord.Embed(
+        title="🛡️ ATOMIC VAULT | SYSTEM DIRECTORY",
+        description="*Welcome to the Vault. Systems are currently OPERATIONAL.*",
+        color=EMBED_COLOR
+    )
+
+    # --- MEMBER SECTION ---
+    embed.add_field(
+        name="🔑 MEMBER OPERATIONS",
+        value=(
+            "> `/my-service` — View your active OTPs & status.\n"
+            "> `/stats` — Check your profile, vouches, and trust bar.\n"
+            "> `/vouch` — Record a successful transaction for a member."
+        ),
+        inline=False
+    )
+
+    # --- STAFF SECTION ---
+    if is_staff:
+        embed.add_field(
+            name="🛠️ STAFF OPERATIONS",
+            value=(
+                "> `/create-service` — Initiate job & generate secret OTPs.\n"
+                "> `/start-service` — Verify Start OTP to begin.\n"
+                "> `/complete-service` — Verify End OTP & log receipt.\n"
+                "> `/cancel-service` — Void an active job with Cancel OTP.\n"
+                "> `/view-active` — Monitor all global active tasks."
+            ),
+            inline=False
+        )
+
+    # --- MODERATION SECTION ---
+    if is_admin or is_mod:
+        embed.add_field(
+            name="🔨 MODERATION & ADMIN",
+            value=(
+                "> `/mute` / `/unmute` — Manage member communication.\n"
+                "> `/kick` / `/ban` — Remove threats from the Vault.\n"
+                "> `/set-pulse` — Deploy/Relocate the live Pulse dashboard.\n"
+                "> `/setup` — Auto-configure categories and channels."
+            ),
+            inline=False
+        )
+
+    # --- UTILITIES ---
+    embed.add_field(
+        name="🛰️ UTILITIES", 
+        value="`!afk [reason]` — Set status\n`/ping` — Check latency", 
+        inline=True
+    )
+
+    embed.set_footer(text=f"User: {interaction.user.display_name} • Aura: W Code Active")
+    if bot.user.avatar:
+        embed.set_thumbnail(url=bot.user.avatar.url)
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 keep_alive()
 bot.run(TOKEN)
