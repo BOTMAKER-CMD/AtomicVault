@@ -413,7 +413,7 @@ async def cancel_service(interaction: discord.Interaction, service_id: str):
     
     # 2. Send the response to the user
     await interaction.response.send_message(
-        f"✅ Request received. Service **{service_id}** has been cancelled.", 
-        ephemeral=True  # 'True' means only the user who typed it can see this message)
+        f"✅ Request received. Service **{service_id}** has been cancelled."), 
+        ephemeral=True  # 'True' means only the user who typed it can see this message
 keep_alive()
 bot.run(TOKEN)
