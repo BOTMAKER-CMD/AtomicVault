@@ -405,23 +405,15 @@ async def my_service(interaction: discord.Interaction):
     
     embed.set_footer(text="Keep these codes confidential. Click to reveal.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
-@bot.command(name="cancel_service")
-async def cancel_service(ctx, service_id: str = None):
-    if service_id is None:
-        await ctx.send("❌ Please provide the **Service ID** you want to cancel.")
-        return
-
-    # 1. Add your logic here to check if the service exists in your database/list
-    # 2. Logic to stop the specific process/API call
+@bot.tree.command(name="cancel_service", description="Cancel an active service or OTP request")
+@app_commands.describe(service_id="The ID of the service you want to stop")
+async def cancel_service(interaction: discord.Interaction, service_id: str):
+    # 1. Add your logic here to find and stop the service
+    # Example: result = my_otp_api.cancel(service_id)
     
-    # Example Response:
-    embed = discord.Embed(
-        title="Service Cancelled",
-        description=f"Successfully terminated service: **{service_id}**",
-        color=discord.Color.red()
-    )
-    embed.set_footer(text=f"Requested by {ctx.author.name}")
-    
-    await ctx.send(embed=embed)
+    # 2. Send the response to the user
+    await interaction.response.send_message(
+        f"✅ Request received. Service **{service_id}** has been cancelled.", 
+        ephemeral=True  # 'True' means only the user who typed it can see this message)
 keep_alive()
 bot.run(TOKEN)
