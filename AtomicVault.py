@@ -319,7 +319,8 @@ async def complete_service(interaction: discord.Interaction, customer: discord.M
     bot.save_json(ACTIVE_SERVICES_FILE, active)
 
     # Response to Staff
-    await interaction.response.send_message(content="🏁 **Service Finalized.** Receipt generated in logs.", embed=receipt)@tree.command(name="cancel-service", description="Staff: Verify Cancel OTP")
+    await interaction.response.send_message(content="🏁 **Service Finalized.** Receipt generated in logs.", embed=receipt)
+@tree.command(name="cancel-service", description="Staff: Verify Cancel OTP")
 async def cancel_service(interaction: discord.Interaction, customer: discord.Member, otp: str, reason: str):
     active = bot.load_json(ACTIVE_SERVICES_FILE)
     job = active.get(str(customer.id))
@@ -405,15 +406,5 @@ async def my_service(interaction: discord.Interaction):
     
     embed.set_footer(text="Keep these codes confidential. Click to reveal.")
     await interaction.response.send_message(embed=embed, ephemeral=True)
-@bot.tree.command(name="cancel_service", description="Cancel an active service or OTP request")
-@app_commands.describe(service_id="The ID of the service you want to stop")
-async def cancel_service(interaction: discord.Interaction, service_id: str):
-    # 1. Add your logic here to find and stop the service
-    # Example: result = my_otp_api.cancel(service_id)
-    
-    # 2. Send the response to the user
-    await interaction.response.send_message(
-        f"✅ Request received. Service **{service_id}** has been cancelled."), 
-        ephemeral=True  # 'True' means only the user who typed it can see this message
 keep_alive()
 bot.run(TOKEN)
