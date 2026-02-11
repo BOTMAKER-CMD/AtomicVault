@@ -65,11 +65,12 @@ class VaultBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents, help_command=None)
         self.afk_users = {}
 
-    async def setup_hook(self):
-    # This moves your data to the cloud the first time you run it on Render
-    await self.migrate_json_to_mongo()
+   async def setup_hook(self):
+        # Everything here must be indented by 4 spaces
+        await self.migrate_json_to_mongo()
         self.vault_pulse.start()
         await self.tree.sync()
+        print("🛰️ Vault Systems Synchronized with Cloud Database.")
 async def migrate_json_to_mongo(self):
     """Safely migrates local JSON data to the MongoDB Cloud."""
     import json
