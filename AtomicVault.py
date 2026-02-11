@@ -150,47 +150,36 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    if message.author.bot or not message.guild: return
-    
+    # Ignore bots and DMs
+    if message.author.bot or not message.guild:
+        return
+
+    # ─── 1. AFK LOGIC ──────────────────────────────────────
+    # Check if the sender is returning from AFK
     if message.author.id in bot.afk_users:
         data = bot.afk_users.pop(message.author.id)
         duration = afk_time_ago(int(time.time()) - data["time"])
-        await message.channel.send(f"👋 Welcome back **{message.author.display_name}**\n⏱️ AFK for: {duration}", delete_after=6)
-    
+        await message.channel.send(
+            f"👋 Welcome back **{message.author.display_name}**\n⏱️ AFK for: {duration}",
+            delete_after=6
+        )
+
+    # Check if anyone mentioned is AFK
     for user in message.mentions:
         if user.id in bot.afk_users:
             data = bot.afk_users[user.id]
             duration = afk_time_ago(int(time.time()) - data["time"])
-            await message.channel.send(f"💤 **{user.display_name} is AFK**\n📌 Reason: {data['reason']}\n⏱️ {duration}", delete_after=8)
-            
-    await bot.process_commands(message)
+            await message.channel.send(
+                f"💤 **{user.display_name} is AFK**\n📌 Reason: {data['reason']}\n⏱️ {duration}",
+                delete_after=8
+            )
 
-@bot.event
-async def on_member_join(member):
-    if member.guild.id == ALLOWED_GUILD_ID:
-        config = bot.load_json(PULSE_FILE)
-        config["recent_action"] = f"📥 New Arrival: {member.name}"
-        bot.save_json(PULSE_FILE, config)
-        bot.loop.create_task(bot.vault_pulse())
-
-@bot.event
-async def on_member_remove(member):
-    if member.guild.id == ALLOWED_GUILD_ID:
-        config = bot.load_json(PULSE_FILE)
-        config["recent_action"] = f"📤 Member Left: {member.name}"
-        bot.save_json(PULSE_FILE, config)
-        bot.loop.create_task(bot.vault_pulse())
-@bot.event
-async def on_message(message):
-    if message.author.bot or not message.guild:
-        return
-
-       # ─── XP + Leveling System ─────────────────────────────────────────────────────
+    # ─── 2. XP + LEVELING SYSTEM ──────────────────────────
     user_id = str(message.author.id)
 
-    # XP amount
+    # XP amount calculation
     if message.author.id in CORE_TEAM:
-        added_xp = random.randint(50, 150)          # 10× boost
+        added_xp = random.randint(50, 150)  # Staff Boost
         boost_text = " (10× Staff Boost! 🔥)"
     else:
         added_xp = random.randint(5, 15)
@@ -206,7 +195,6 @@ async def on_message(message):
 
     # Level-up handling
     if new_level > old_level:
-        # Theme-based role names
         level_titles = {
             1:  "Newbie Adventurer",
             5:  "Sea Explorer",
@@ -218,45 +206,47 @@ async def on_message(message):
             40: "Mirage Hunter",
             50: "Legendary Pirate",
             60: "God of the Seas",
-            # For any level not in the dict, fallback to generic
         }
 
         title = level_titles.get(new_level, "Adventurer")
         role_name = f"Level {new_level} - {title}"
 
-        # Find or create the role
+        # Attempt to find or create the role
         role = discord.utils.get(message.guild.roles, name=role_name)
         if not role:
-            role = await message.guild.create_role(
-                name=role_name,
-                color=discord.Color.random(),   # or choose fixed colors later
-                hoist=True if new_level >= 5 else False  # hoist higher levels
-            )
+            try:
+                role = await message.guild.create_role(
+                    name=role_name,
+                    color=discord.Color.random(),
+                    hoist=True if new_level >= 5 else False
+                )
+            except discord.Forbidden:
+                print(f"Missing permissions to create role: {role_name}")
 
-        await message.author.add_roles(role)
+        if role:
+            try:
+                await message.author.add_roles(role)
+            except discord.Forbidden:
+                print(f"Missing permissions to add role to {message.author.name}")
 
-        # Level-up message
+        # Level-up announcement
         embed = discord.Embed(
             title="🎉 LEVEL UP!",
             description=f"{message.author.mention} has reached **Level {new_level}**!{boost_text}",
             color=0x00ff88 if message.author.id not in CORE_TEAM else 0xffaa00
         )
-        embed.add_field(
-            name="New Rank",
-            value=title,
-            inline=False
-        )
+        embed.add_field(name="New Rank", value=title, inline=False)
         embed.set_thumbnail(url=message.author.display_avatar.url)
-        embed.set_footer(text="Keep chatting & helping to level up faster! 🍍")
+        embed.set_footer(text="Keep chatting to level up! 🍍")
 
         await message.channel.send(embed=embed)
 
-    # Save XP data
-    self.save_json(bot.xp_file, bot.xp_data)
+    # Save data using the 'bot' instance
+    bot.save_json(bot.xp_file, bot.xp_data)
 
-    # Process commands & other events
-    await bot.process_commands(message)
-# ─── PREFIX COMMANDS ────────────────────────────────────
+    # ─── 3. PROCESS COMMANDS ──────────────────────────────
+    # This is CRITICAL for !ping and other prefix commands to work
+    await bot.process_commands(message)# ─── PREFIX COMMANDS ────────────────────────────────────
 @bot.command()
 async def ping(ctx):
     await ctx.send("⚡ Atomic Vault is online")
