@@ -46,10 +46,17 @@ CORE_TEAM = {
 }
 # --- MONGODB SETUP ---
 # Fetching the URL from Render's Environment Variables
+# --- MONGODB SETUP ---
 MONGO_URL = os.getenv("MONGO_URL")
-cluster = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
-db = cluster["AtomicVault"]
 
+if not MONGO_URL:
+    print("❌ ERROR: MONGO_URL environment variable is missing!")
+    # This stops the bot from trying to connect to localhost
+    cluster = None 
+else:
+    # Adding tlsAllowInvalidCertificates helps avoid connection issues on some hosts
+    cluster = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL, tlsAllowInvalidCertificates=True)
+    db = cluster["AtomicVault"]
 # Collections (Think of these as your new "JSON Files")
 xp_col = db["levels"]
 vouch_col = db["vouches"]
