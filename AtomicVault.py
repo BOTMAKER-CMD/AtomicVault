@@ -72,34 +72,27 @@ class VaultBot(commands.Bot):
         await self.tree.sync()
         print("🛰️ Vault Systems Synchronized with Cloud Database.")
     async def migrate_json_to_mongo(self):
-    """Safely migrates local JSON data to the MongoDB Cloud."""
         import json
-    
-    # Mapping files to their new collections
-    files_to_migrate = {
-        "xp.json": {"col": xp_col, "field": "xp"},
-        "vouches.json": {"col": vouch_col, "field": "count"},
-        "service_stats.json": {"col": service_stats_col, "field": "completed"}
-    }
-    
-    for filename, info in files_to_migrate.items():
-        if os.path.exists(filename):
-            try:
-                with open(filename, "r") as f:
-                    data = json.load(f)
-                    for uid, val in data.items():
-                        # Upsert: Update if exists, Insert if new
-                        await info["col"].update_one(
-                            {"_id": str(uid)},
-                            {"$set": {info["field"]: val}},
-                            upsert=True
-                        )
-                print(f"✅ SUCCESS: {filename} migrated to MongoDB.")
-                # After migrating, we rename the file so it doesn't run every time
-                os.rename(filename, f"migrated_{filename}")
-            except Exception as e:
-                print(f"❌ ERROR migrating {filename}: {e}")
-
+        files_to_migrate = {
+            "xp.json": {"col": xp_col, "field": "xp"},
+            "vouches.json": {"col": vouch_col, "field": "count"},
+            "service_stats.json": {"col": service_stats_col, "field": "completed"}
+        }
+        for filename, info in files_to_migrate.items():
+            if os.path.exists(filename):
+                try:
+                    with open(filename, "r") as f:
+                        data = json.load(f)
+                        for uid, val in data.items():
+                            await info["col"].update_one(
+                                {"_id": str(uid)},
+                                {"$set": {info["field"]: val}},
+                                upsert=True
+                            )
+                    print(f"✅ SUCCESS: {filename} migrated.")
+                    os.rename(filename, f"migrated_{filename}")
+                except Exception as e:
+                    print(f"❌ Error migrating {filename}: {e}")
     # --- THE PULSE LOOP ---
     @tasks.loop(seconds=60)
 async def vault_pulse(self):
