@@ -65,15 +65,15 @@ class VaultBot(commands.Bot):
         super().__init__(command_prefix="!", intents=intents, help_command=None)
         self.afk_users = {}
 
-   async def setup_hook(self):
-        # Everything here must be indented by 4 spaces
+    async def setup_hook(self):
+        # This line must be indented 8 spaces (4 for class, 4 for function)
         await self.migrate_json_to_mongo()
         self.vault_pulse.start()
         await self.tree.sync()
         print("🛰️ Vault Systems Synchronized with Cloud Database.")
 	async def migrate_json_to_mongo(self):
     """Safely migrates local JSON data to the MongoDB Cloud."""
-    import json
+        import json
     
     # Mapping files to their new collections
     files_to_migrate = {
