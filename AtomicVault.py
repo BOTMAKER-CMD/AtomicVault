@@ -12,6 +12,8 @@ from datetime import timedelta
 from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
+import motor.motor_asyncio
+
 
 app = Flask('')
 
@@ -25,7 +27,6 @@ def run():
 def keep_alive():
     t = Thread(target=run)
     t.start()
-
 # ─── CONFIGURATION ──────────────────────────────────────────
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -33,12 +34,9 @@ TOKEN = os.getenv("DISCORD_TOKEN")
 ALLOWED_GUILD_ID = 1380731003655557192
 VOUCH_CHANNEL_ID = 1470447530725609533
 SERVICE_LOG_CHANNEL_ID = 1470490292166721687
-VOUCH_FILE = "vouches.json"
-SERVICE_DATA_FILE = "service_stats.json"
-ACTIVE_SERVICES_FILE = "active_services.json"
-PULSE_FILE = "pulse_config.json"
 EMBED_COLOR = 0x00f7ff
-
+# Add this with your other IDs
+LEVEL_LOG_CHANNEL_ID = 1471099337537749032  # Replace with your actual channel ID
 CORE_TEAM = {
     1380723814115315803: "The Atomic Vault",
     1203199020189753354: "Sir Haruto",
@@ -46,7 +44,18 @@ CORE_TEAM = {
     1414709841112600579: "marloww",
     1155023196907647006: "Crazy Captain"
 }
+# --- MONGODB SETUP ---
+# Fetching the URL from Render's Environment Variables
+MONGO_URL = os.getenv("MONGO_URL")
+cluster = motor.motor_asyncio.AsyncIOMotorClient(MONGO_URL)
+db = cluster["AtomicVault"]
 
+# Collections (Think of these as your new "JSON Files")
+xp_col = db["levels"]
+vouch_col = db["vouches"]
+service_stats_col = db["service_stats"]
+active_services_col = db["active_services"]
+config_col = db["bot_config"] # Stores Pulse & Global Settings
 # ─── BOT CLASS ─────────────────────────────────────────────
 class VaultBot(commands.Bot):
     def __init__(self):
@@ -57,14 +66,48 @@ class VaultBot(commands.Bot):
         self.afk_users = {}
 
     async def setup_hook(self):
+    # This moves your data to the cloud the first time you run it on Render
+    await self.migrate_json_to_mongo()
         self.vault_pulse.start()
         await self.tree.sync()
+async def migrate_json_to_mongo(self):
+    """Safely migrates local JSON data to the MongoDB Cloud."""
+    import json
+    
+    # Mapping files to their new collections
+    files_to_migrate = {
+        "xp.json": {"col": xp_col, "field": "xp"},
+        "vouches.json": {"col": vouch_col, "field": "count"},
+        "service_stats.json": {"col": service_stats_col, "field": "completed"}
+    }
+    
+    for filename, info in files_to_migrate.items():
+        if os.path.exists(filename):
+            try:
+                with open(filename, "r") as f:
+                    data = json.load(f)
+                    for uid, val in data.items():
+                        # Upsert: Update if exists, Insert if new
+                        await info["col"].update_one(
+                            {"_id": str(uid)},
+                            {"$set": {info["field"]: val}},
+                            upsert=True
+                        )
+                print(f"✅ SUCCESS: {filename} migrated to MongoDB.")
+                # After migrating, we rename the file so it doesn't run every time
+                os.rename(filename, f"migrated_{filename}")
+            except Exception as e:
+                print(f"❌ ERROR migrating {filename}: {e}")
 
     # --- THE PULSE LOOP ---
     @tasks.loop(seconds=60)
-    async def vault_pulse(self):
-        config = self.load_json(PULSE_FILE)
-        if not config.get("channel_id"): return
+async def vault_pulse(self):
+    # Fetch from Mongo
+    config = await config_col.find_one({"_id": "pulse"}) or {}
+    if not config.get("channel_id"): return
+    
+    # ... logic to calculate total vouches ...
+    # Use: total_vouch_data = await vouch_col.count_documents({}) or similar logic
         
         channel = self.get_channel(config["channel_id"])
         guild = self.get_guild(ALLOWED_GUILD_ID)
@@ -114,10 +157,6 @@ class VaultBot(commands.Bot):
 
 bot = VaultBot()
 tree = bot.tree
-# In __init__ or globally
-bot.xp_file = "xp.json"
-bot.xp_data = bot.load_json(bot.xp_file) or {}
-
 # ─── UTILITIES ──────────────────────────────────────────
 def afk_time_ago(seconds):
     mins = seconds // 60
@@ -155,7 +194,6 @@ async def on_message(message):
         return
 
     # ─── 1. AFK LOGIC ──────────────────────────────────────
-    # Check if the sender is returning from AFK
     if message.author.id in bot.afk_users:
         data = bot.afk_users.pop(message.author.id)
         duration = afk_time_ago(int(time.time()) - data["time"])
@@ -164,7 +202,6 @@ async def on_message(message):
             delete_after=6
         )
 
-    # Check if anyone mentioned is AFK
     for user in message.mentions:
         if user.id in bot.afk_users:
             data = bot.afk_users[user.id]
@@ -174,20 +211,25 @@ async def on_message(message):
                 delete_after=8
             )
 
-    # ─── 2. XP + LEVELING SYSTEM ──────────────────────────
+    # ─── 2. XP + LEVELING SYSTEM (MongoDB Version) ─────────
     user_id = str(message.author.id)
 
-    # XP amount calculation
+    # Fetch from MongoDB
+    user_data = await xp_col.find_one({"_id": user_id})
+    current_xp = user_data["xp"] if user_data else 0
+
+    # XP calculation
     if message.author.id in CORE_TEAM:
-        added_xp = random.randint(50, 150)  # Staff Boost
+        added_xp = random.randint(50, 150)
         boost_text = " (10× Staff Boost! 🔥)"
     else:
         added_xp = random.randint(5, 15)
         boost_text = ""
 
-    current_xp = bot.xp_data.get(user_id, 0)
     new_xp = current_xp + added_xp
-    bot.xp_data[user_id] = new_xp
+    
+    # Save to MongoDB
+    await xp_col.update_one({"_id": user_id}, {"$set": {"xp": new_xp}}, upsert=True)
 
     # Level calculation
     old_level = current_xp // 100
@@ -211,23 +253,15 @@ async def on_message(message):
         title = level_titles.get(new_level, "Adventurer")
         role_name = f"Level {new_level} - {title}"
 
-        # Attempt to find or create the role
+        # ─── ROLE CHECK (No Creation) ───
+        # This will ONLY give the role if it already exists in your server
         role = discord.utils.get(message.guild.roles, name=role_name)
-        if not role:
-            try:
-                role = await message.guild.create_role(
-                    name=role_name,
-                    color=discord.Color.random(),
-                    hoist=True if new_level >= 5 else False
-                )
-            except discord.Forbidden:
-                print(f"Missing permissions to create role: {role_name}")
-
+        
         if role:
             try:
                 await message.author.add_roles(role)
             except discord.Forbidden:
-                print(f"Missing permissions to add role to {message.author.name}")
+                print(f"❌ Cannot add role {role_name}: Check bot role hierarchy.")
 
         # Level-up announcement
         embed = discord.Embed(
@@ -239,10 +273,13 @@ async def on_message(message):
         embed.set_thumbnail(url=message.author.display_avatar.url)
         embed.set_footer(text="Keep chatting to level up! 🍍")
 
-        await message.channel.send(embed=embed)
-
-    # Save data using the 'bot' instance
-    bot.save_json(bot.xp_file, bot.xp_data)
+        # ─── LOGGING ───
+        log_channel = bot.get_channel(LEVEL_LOG_CHANNEL_ID)
+        if log_channel:
+            await log_channel.send(content=f"Congrats {message.author.mention}!", embed=embed)
+        else:
+            # Fallback to current channel if log channel is missing
+            await message.channel.send(embed=embed, delete_after=10)
 
     # ─── 3. PROCESS COMMANDS ──────────────────────────────
     # This is CRITICAL for !ping and other prefix commands to work
@@ -262,7 +299,10 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
     target = member or interaction.user
     user_id = str(target.id)
     
-    xp = bot.xp_data.get(user_id, 0)
+    # FIX: Fetch from MongoDB instead of bot.xp_data
+    user_data = await xp_col.find_one({"_id": user_id})
+    xp = user_data["xp"] if user_data else 0
+    
     level = xp // 100
     next_level_xp = (level + 1) * 100
     progress = xp % 100
@@ -272,36 +312,26 @@ async def level(interaction: discord.Interaction, member: discord.Member = None)
     embed.set_thumbnail(url=target.display_avatar.url)
     embed.add_field(name="Level", value=f"**{level}**", inline=True)
     embed.add_field(name="Total XP", value=f"{xp}", inline=True)
-    embed.add_field(name="To Next Level", value=f"{next_level_xp - xp} XP remaining", inline=True)
     embed.add_field(name="Progress", value=f"{bar} ({progress}/100)", inline=False)
-    embed.set_footer(text="Earn XP by chatting and staying active! 💠")
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
 @tree.command(name="levelsboard", description="Top members by level")
 async def levelsboard(interaction: discord.Interaction):
-    if not bot.xp_data:
+    # FIX: Get top 10 users directly from MongoDB sorted by XP
+    cursor = xp_col.find().sort("xp", -1).limit(10)
+    top_users = await cursor.to_list(length=10)
+
+    if not top_users:
         return await interaction.response.send_message("No levels yet 😔", ephemeral=True)
     
-    sorted_members = sorted(bot.xp_data.items(), key=lambda x: x[1], reverse=True)[:10]
-    
     embed = discord.Embed(title="🏆 Level Leaderboard", color=0x00f7ff)
-    for i, (user_id, xp) in enumerate(sorted_members, 1):
-        try:
-            user = await bot.fetch_user(int(user_id))
-            level = xp // 100
-            embed.add_field(
-                name=f"#{i} {user.display_name} - Level {level}",
-                value=f"XP: {xp}",
-                inline=False
-            )
-        except:
-            continue
+    for i, data in enumerate(top_users, 1):
+        user_id = data["_id"]
+        xp = data["xp"]
+        lvl = xp // 100
+        embed.add_field(name=f"#{i} Member ID: {user_id}", value=f"Lvl {lvl} | XP: {xp}", inline=False)
     
-    embed.set_footer(text="Chat more to climb the ranks! 🔥")
-    await interaction.response.send_message(embed=embed)
-@tree.command(name="ping", description="Check bot latency")
+    await interaction.response.send_message(embed=embed)@tree.command(name="ping", description="Check bot latency")
 async def slash_ping(interaction: discord.Interaction):
     await interaction.response.send_message(f"🏓 Pong `{round(bot.latency * 1000)}ms`", ephemeral=True)
 
@@ -343,38 +373,60 @@ async def vouch(interaction: discord.Interaction, target: discord.Member, reason
 @tree.command(name="stats", description="Check profile stats")
 async def stats(interaction: discord.Interaction, member: discord.Member = None):
     target = member or interaction.user
-    v_data = bot.load_json(VOUCH_FILE)
-    s_data = bot.load_json(SERVICE_DATA_FILE)
-    vouches = v_data.get(str(target.id), 0)
-    services = s_data.get(str(target.id), 0)
+    target_id = str(target.id)
+
+    # Fetch data from multiple collections
+    vouch_data = await vouch_col.find_one({"_id": target_id})
+    service_data = await service_stats_col.find_one({"_id": target_id})
+    
+    vouches = vouch_data.get("count", 0) if vouch_data else 0
+    services = service_data.get("completed", 0) if service_data else 0
 
     color = 0x00ffff if target.id in CORE_TEAM else EMBED_COLOR
     embed = discord.Embed(title="📊 Vault Profile", color=color)
     embed.set_author(name=target.display_name, icon_url=target.display_avatar.url)
-    embed.add_field(name="🛰️ Clearance", value=f"`{CORE_TEAM.get(target.id, '👤 MEMBER')}`", inline=True)
+    
+    # Clearance Logic
+    if target.id in CORE_TEAM: clearance = f"⭐ {CORE_TEAM[target.id]}"
+    elif vouches >= 25: clearance = "💎 ELITE"
+    elif vouches >= 10: clearance = "✅ TRUSTED"
+    else: clearance = "👤 MEMBER"
+
+    embed.add_field(name="🛰️ Clearance", value=f"`{clearance}`", inline=True)
     embed.add_field(name="🌟 Total Vouches", value=f"`{vouches}`", inline=True)
     
     if target.id in CORE_TEAM:
         embed.add_field(name="🛠️ Jobs Completed", value=f"`{services}`", inline=True)
     
+    # Visual Progress Bar
     bar_length = 10
     progress = min(int(vouches / 25 * bar_length), bar_length)
     bar = "🟦" * progress + "⬛" * (bar_length - progress)
-    embed.add_field(name="📈 Trust Progress", value=f"{bar}", inline=False)
-    embed.set_footer(text="Atomic Vault Security • W Aura Active")
+    embed.add_field(name="📈 Trust Progress (to Elite)", value=f"{bar}", inline=False)
     
     await interaction.response.send_message(embed=embed)
-
 # ─── SERVICE SYSTEM ──────────────────────────────────────
 @tree.command(name="create-service", description="Staff: Create a service")
 async def create_service(interaction: discord.Interaction, customer: discord.Member, service_name: str):
-    if interaction.user.id not in CORE_TEAM: return await interaction.response.send_message("❌ Unauthorized", ephemeral=True)
+    if interaction.user.id not in CORE_TEAM: 
+        return await interaction.response.send_message("❌ Unauthorized", ephemeral=True)
 
-    active = bot.load_json(ACTIVE_SERVICES_FILE)
     s_otp, e_otp, c_otp = generate_otp(), generate_otp(), generate_otp()
-    active[str(customer.id)] = {"name": service_name, "staff": interaction.user.name, "s_otp": s_otp, "e_otp": e_otp, "c_otp": c_otp, "status": "PENDING"}
-    bot.save_json(ACTIVE_SERVICES_FILE, active)
-
+    
+    # Save to MongoDB
+    await active_services_col.update_one(
+        {"_id": str(customer.id)},
+        {"$set": {
+            "name": service_name,
+            "staff": interaction.user.name,
+            "staff_id": interaction.user.id,
+            "s_otp": s_otp,
+            "e_otp": e_otp,
+            "c_otp": c_otp,
+            "status": "PENDING"
+        }},
+        upsert=True
+    )
     log_chan = bot.get_channel(SERVICE_LOG_CHANNEL_ID)
     if log_chan: await log_chan.send(embed=discord.Embed(title="📝 SERVICE CREATED", description=f"**{service_name}** for {customer.mention}", color=0xffa500))
 
@@ -398,61 +450,96 @@ async def start_service(interaction: discord.Interaction, customer: discord.Memb
 
 @tree.command(name="complete-service", description="Staff: Verify End OTP and generate receipt")
 async def complete_service(interaction: discord.Interaction, customer: discord.Member, otp: str):
-    active = bot.load_json(ACTIVE_SERVICES_FILE)
-    job = active.get(str(customer.id))
+    if interaction.user.id not in CORE_TEAM:
+        return await interaction.response.send_message("❌ Unauthorized", ephemeral=True)
+
+    # Fetch the active job from MongoDB
+    job = await active_services_col.find_one({"_id": str(customer.id)})
     
     if not job or otp != job["e_otp"]: 
         return await interaction.response.send_message("❌ Invalid OTP. Verification failed.", ephemeral=True)
 
-    # Update Stats
-    stats = bot.load_json(SERVICE_DATA_FILE)
-    stats[str(interaction.user.id)] = stats.get(str(interaction.user.id), 0) + 1
-    bot.save_json(SERVICE_DATA_FILE, stats)
+    # Increment Staff Stats in MongoDB
+    staff_id = str(interaction.user.id)
+    stats_result = await service_stats_col.find_one_and_update(
+        {"_id": staff_id},
+        {"$inc": {"completed": 1}},
+        upsert=True,
+        return_document=True
+    )
+    total_jobs = stats_result.get("completed", 1)
 
     # --- GENERATE RECEIPT ---
-    receipt = discord.Embed(title="📄 SERVICE COMPLETION RECEIPT", color=0x2bff88) # Success Green
+    receipt = discord.Embed(title="📄 SERVICE COMPLETION RECEIPT", color=0x2bff88)
     receipt.set_author(name="Atomic Vault Ledger", icon_url=interaction.user.display_avatar.url)
     
     receipt.add_field(name="🛠️ Service Type", value=f"`{job['name']}`", inline=False)
     receipt.add_field(name="👤 Customer", value=customer.mention, inline=True)
     receipt.add_field(name="👑 Staff", value=interaction.user.mention, inline=True)
-    receipt.add_field(name="🛰️ Status", value="`VERIFIED & LOGGED`", inline=True)
-    receipt.add_field(name="🌟 Staff Total Jobs", value=f"`{stats[str(interaction.user.id)]}`", inline=True)
-    
-    receipt.set_footer(text=f"ID: {generate_otp()}-{generate_otp()} • {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    receipt.add_field(name="🌟 Staff Total Jobs", value=f"`{total_jobs}`", inline=True)
+    receipt.set_footer(text=f"ID: {generate_otp()} • {time.strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # Send to Log Channel
+    # Log to Channel
     log_chan = bot.get_channel(SERVICE_LOG_CHANNEL_ID)
     if log_chan:
         await log_chan.send(embed=receipt)
 
-    # Clean up active job
-    del active[str(customer.id)]
-    bot.save_json(ACTIVE_SERVICES_FILE, active)
+    # Remove from Active Services in MongoDB
+    await active_services_col.delete_one({"_id": str(customer.id)})
 
-    # Response to Staff
-    await interaction.response.send_message(content="🏁 **Service Finalized.** Receipt generated in logs.", embed=receipt)
+    await interaction.response.send_message(content="🏁 **Service Finalized.** Receipt generated.", embed=receipt)
 @tree.command(name="cancel-service", description="Staff: Verify Cancel OTP")
 async def cancel_service(interaction: discord.Interaction, customer: discord.Member, otp: str, reason: str):
-    active = bot.load_json(ACTIVE_SERVICES_FILE)
-    job = active.get(str(customer.id))
-    if not job or otp != job["c_otp"]: return await interaction.response.send_message("❌ Invalid OTP", ephemeral=True)
+    if interaction.user.id not in CORE_TEAM:
+        return await interaction.response.send_message("❌ Unauthorized", ephemeral=True)
 
-    del active[str(customer.id)]
-    bot.save_json(ACTIVE_SERVICES_FILE, active)
-    await interaction.response.send_message(f"🚫 Service voided: {reason}")
+    # 1. Look for the active job in MongoDB
+    job = await active_services_col.find_one({"_id": str(customer.id)})
+    
+    # 2. Check if job exists and OTP matches
+    if not job:
+        return await interaction.response.send_message("🛰️ No active service found for this user.", ephemeral=True)
+    
+    if otp != job["c_otp"]:
+        return await interaction.response.send_message("❌ Invalid Cancel OTP. Verification failed.", ephemeral=True)
 
-@tree.command(name="view-active", description="Staff: View all active services")
+    # 3. Remove the job from the database
+    await active_services_col.delete_one({"_id": str(customer.id)})
+
+    # 4. Create a Cancel Log Embed
+    cancel_embed = discord.Embed(title="🚫 SERVICE VOIDED", color=0xff4444)
+    cancel_embed.add_field(name="🛠️ Service", value=f"`{job['name']}`", inline=True)
+    cancel_embed.add_field(name="👤 Customer", value=customer.mention, inline=True)
+    cancel_embed.add_field(name="👑 Cancelled By", value=interaction.user.mention, inline=True)
+    cancel_embed.add_field(name="📝 Reason", value=f"```fix\n{reason}```", inline=False)
+    cancel_embed.set_footer(text=f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    # Send log to channel
+    log_chan = bot.get_channel(SERVICE_LOG_CHANNEL_ID)
+    if log_chan:
+        await log_chan.send(embed=cancel_embed)
+
+    await interaction.response.send_message(f"✅ Service for {customer.mention} has been successfully voided.")@tree.command(name="view-active", description="Staff: View all active services")
 async def view_active(interaction: discord.Interaction):
-    if interaction.user.id not in CORE_TEAM: return await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
-    active = bot.load_json(ACTIVE_SERVICES_FILE)
-    if not active: return await interaction.response.send_message("🛰️ No active services.", ephemeral=True)
+    if interaction.user.id not in CORE_TEAM: 
+        return await interaction.response.send_message("❌ Unauthorized.", ephemeral=True)
+    
+    # Fetch all documents from the active collection
+    cursor = active_services_col.find({})
+    active_jobs = await cursor.to_list(length=100)
+    
+    if not active_jobs: 
+        return await interaction.response.send_message("🛰️ No active services.", ephemeral=True)
     
     embed = discord.Embed(title="🛰️ CURRENT ACTIVE SERVICES", color=EMBED_COLOR)
-    for cid, data in active.items():
-        embed.add_field(name=f"🛠️ {data['name']}", value=f"**Customer:** <@{cid}>\n**Status:** `{data['status']}`", inline=False)
+    for job in active_jobs:
+        customer_id = job["_id"]
+        embed.add_field(
+            name=f"🛠️ {job['name']}", 
+            value=f"**Customer:** <@{customer_id}>\n**Staff:** {job['staff']}\n**Status:** `{job['status']}`", 
+            inline=False
+        )
     await interaction.response.send_message(embed=embed, ephemeral=True)
-
 # ─── MODERATION ──────────────────────────────────────────
 @tree.command(name="ban", description="Ban a member")
 @app_commands.checks.has_permissions(ban_members=True)

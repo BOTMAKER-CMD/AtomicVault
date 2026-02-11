@@ -1,3 +1,5 @@
 discord.py
+motor
+dnspython
 python-dotenv
 flask
