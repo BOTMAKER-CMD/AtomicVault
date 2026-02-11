@@ -114,6 +114,9 @@ class VaultBot(commands.Bot):
 
 bot = VaultBot()
 tree = bot.tree
+# In __init__ or globally
+self.xp_file = "xp.json"
+self.xp_data = self.load_json(self.xp_file) or {}
 
 # ─── UTILITIES ──────────────────────────────────────────
 def afk_time_ago(seconds):
@@ -177,7 +180,100 @@ async def on_member_remove(member):
         config["recent_action"] = f"📤 Member Left: {member.name}"
         bot.save_json(PULSE_FILE, config)
         bot.loop.create_task(bot.vault_pulse())
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild:
+        return
 
+    # ─── AFK logic (keeping your original) ────────────────────────────────────────
+    if message.author.id in bot.afk_users:
+        data = bot.afk_users.pop(message.author.id)
+        duration = afk_time_ago(int(time.time()) - data["time"])
+        await message.channel.send(
+            f"👋 Welcome back **{message.author.display_name}**\n⏱️ AFK for: {duration}",
+            delete_after=6
+        )
+
+    for user in message.mentions:
+        if user.id in bot.afk_users:
+            data = bot.afk_users[user.id]
+            duration = afk_time_ago(int(time.time()) - data["time"])
+            await message.channel.send(
+                f"💤 **{user.display_name} is AFK**\n📌 Reason: {data['reason']}\n⏱️ {duration}",
+                delete_after=8
+            )
+
+    # ─── XP + Leveling System ─────────────────────────────────────────────────────
+    user_id = str(message.author.id)
+
+    # XP amount
+    if message.author.id in CORE_TEAM:
+        added_xp = random.randint(50, 150)          # 10× boost
+        boost_text = " (10× Staff Boost! 🔥)"
+    else:
+        added_xp = random.randint(5, 15)
+        boost_text = ""
+
+    current_xp = self.xp_data.get(user_id, 0)
+    new_xp = current_xp + added_xp
+    self.xp_data[user_id] = new_xp
+
+    # Level calculation
+    old_level = current_xp // 100
+    new_level = new_xp // 100
+
+    # Level-up handling
+    if new_level > old_level:
+        # Theme-based role names
+        level_titles = {
+            1:  "Newbie Adventurer",
+            5:  "Sea Explorer",
+            10: "Fruit Hunter",
+            15: "Raid Participant",
+            20: "Awakened Grinder",
+            25: "Bounty Chaser",
+            30: "Sea Beast Slayer",
+            40: "Mirage Hunter",
+            50: "Legendary Pirate",
+            60: "God of the Seas",
+            # For any level not in the dict, fallback to generic
+        }
+
+        title = level_titles.get(new_level, "Adventurer")
+        role_name = f"Level {new_level} - {title}"
+
+        # Find or create the role
+        role = discord.utils.get(message.guild.roles, name=role_name)
+        if not role:
+            role = await message.guild.create_role(
+                name=role_name,
+                color=discord.Color.random(),   # or choose fixed colors later
+                hoist=True if new_level >= 5 else False  # hoist higher levels
+            )
+
+        await message.author.add_roles(role)
+
+        # Level-up message
+        embed = discord.Embed(
+            title="🎉 LEVEL UP!",
+            description=f"{message.author.mention} has reached **Level {new_level}**!{boost_text}",
+            color=0x00ff88 if message.author.id not in CORE_TEAM else 0xffaa00
+        )
+        embed.add_field(
+            name="New Rank",
+            value=title,
+            inline=False
+        )
+        embed.set_thumbnail(url=message.author.display_avatar.url)
+        embed.set_footer(text="Keep chatting & helping to level up faster! 🍍")
+
+        await message.channel.send(embed=embed)
+
+    # Save XP data
+    self.save_json(self.xp_file, self.xp_data)
+
+    # Process commands & other events
+    await bot.process_commands(message)
 # ─── PREFIX COMMANDS ────────────────────────────────────
 @bot.command()
 async def ping(ctx):
@@ -189,6 +285,50 @@ async def afk(ctx, *, reason="AFK"):
     await ctx.send(f"💤 **AFK set:** {reason}", delete_after=6)
 
 # ─── SLASH COMMANDS ─────────────────────────────────────
+@tree.command(name="level", description="Check your level and XP progress")
+async def level(interaction: discord.Interaction, member: discord.Member = None):
+    target = member or interaction.user
+    user_id = str(target.id)
+    
+    xp = bot.xp_data.get(user_id, 0)
+    level = xp // 100
+    next_level_xp = (level + 1) * 100
+    progress = xp % 100
+    bar = "🟦" * (progress // 10) + "⬛" * (10 - (progress // 10))
+    
+    embed = discord.Embed(title=f"{target.display_name}'s Level", color=0x00f7ff)
+    embed.set_thumbnail(url=target.display_avatar.url)
+    embed.add_field(name="Level", value=f"**{level}**", inline=True)
+    embed.add_field(name="Total XP", value=f"{xp}", inline=True)
+    embed.add_field(name="To Next Level", value=f"{next_level_xp - xp} XP remaining", inline=True)
+    embed.add_field(name="Progress", value=f"{bar} ({progress}/100)", inline=False)
+    embed.set_footer(text="Earn XP by chatting and staying active! 💠")
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@tree.command(name="levelsboard", description="Top members by level")
+async def levelsboard(interaction: discord.Interaction):
+    if not bot.xp_data:
+        return await interaction.response.send_message("No levels yet 😔", ephemeral=True)
+    
+    sorted_members = sorted(bot.xp_data.items(), key=lambda x: x[1], reverse=True)[:10]
+    
+    embed = discord.Embed(title="🏆 Level Leaderboard", color=0x00f7ff)
+    for i, (user_id, xp) in enumerate(sorted_members, 1):
+        try:
+            user = await bot.fetch_user(int(user_id))
+            level = xp // 100
+            embed.add_field(
+                name=f"#{i} {user.display_name} - Level {level}",
+                value=f"XP: {xp}",
+                inline=False
+            )
+        except:
+            continue
+    
+    embed.set_footer(text="Chat more to climb the ranks! 🔥")
+    await interaction.response.send_message(embed=embed)
 @tree.command(name="ping", description="Check bot latency")
 async def slash_ping(interaction: discord.Interaction):
     await interaction.response.send_message(f"🏓 Pong `{round(bot.latency * 1000)}ms`", ephemeral=True)
@@ -457,6 +597,111 @@ async def help_command(interaction: discord.Interaction):
             ),
             inline=False
         )
+@tree.command(name="dailyspin", description="Spin the daily wheel for a lucky reward!")
+@app_commands.checks.cooldown(1, 86400)  # once per day
+async def dailyspin(interaction: discord.Interaction):
+    rewards = [
+        "Kitsune luck today! God tier 🍁",
+        "Leopard speed boost activated 🐆",
+        "Dough awakening incoming 🍩",
+        "Just a Banana... try again tomorrow 🍌😂",
+        "Venom pull – solid win 🐍",
+        "Mystery reward: Ask staff for a free raid carry! 👀"
+    ]
+    result = random.choice(rewards)
+    
+    embed = discord.Embed(title="🎰 Daily Spin!", color=0x00f7ff)
+    embed.description = f"{interaction.user.mention} spun the wheel...\n**{result}**"
+    embed.set_footer(text="Come back tomorrow for another spin! ⏳")
+    
+    await interaction.response.send_message(embed=embed)
+
+
+@tree.command(name="roast", description="Roast someone in Blox Fruits style")
+async def roast(interaction: discord.Interaction, target: discord.Member):
+    if target == interaction.user:
+        return await interaction.response.send_message("Don't roast yourself bro 😂", ephemeral=True)
+    
+    roasts = [
+        f"{target.mention} is still using Buddha and calls it 'grinding' 😂",
+        f"{target.mention}'s main fruit is Banana – slips every raid 🍌",
+        f"{target.mention} saw Mirage and thought it was Buddha spawn 🤡",
+        f"{target.mention} got Dough but still not awakened – certified noob",
+        f"{target.mention}'s bounty is 0 because he dies only at marine spawns 😭"
+    ]
+    roast_line = random.choice(roasts)
+    
+    await interaction.response.send_message(roast_line)
+@tree.command(name="setuplevels", description="Setup all level roles automatically (Staff only)")
+async def setuplevels(interaction: discord.Interaction):
+    # Sirf core team/staff use kar sake
+    if interaction.user.id not in CORE_TEAM:
+        return await interaction.response.send_message(
+            "❌ This command is for staff/core team only!",
+            ephemeral=True
+        )
+
+    # Check if already set up (ek simple flag use karte hain)
+    setup_file = "level_setup.json"
+    setup_data = bot.load_json(setup_file) or {}
+
+    guild_id = str(interaction.guild.id)
+    if setup_data.get(guild_id, False):
+        return await interaction.response.send_message(
+            "✅ Levels already set up! No need to run again.",
+            ephemeral=True
+        )
+
+    # Level roles list with names, colors, hoist
+    level_roles = [
+        {"level": 1,  "name": "Level 1 - Newbie Adventurer",   "color": 0xcccccc, "hoist": False},
+        {"level": 5,  "name": "Level 5 - Sea Explorer",         "color": 0x00ff88, "hoist": True},
+        {"level": 10, "name": "Level 10 - Fruit Hunter",        "color": 0x00aaff, "hoist": True},
+        {"level": 15, "name": "Level 15 - Raid Participant",    "color": 0xaa55ff, "hoist": True},
+        {"level": 20, "name": "Level 20 - Awakened Grinder",    "color": 0xffd700, "hoist": True},
+        {"level": 25, "name": "Level 25 - Bounty Chaser",       "color": 0xff8800, "hoist": True},
+        {"level": 30, "name": "Level 30 - Sea Beast Slayer",    "color": 0xff4444, "hoist": True},
+        {"level": 40, "name": "Level 40 - Mirage Hunter",       "color": 0x00ffff, "hoist": True},
+        {"level": 50, "name": "Level 50 - Legendary Pirate",    "color": 0xff00aa, "hoist": True},
+        {"level": 60, "name": "Level 60 - God of the Seas",     "color": 0xffffff, "hoist": True},
+        {"level": 75, "name": "Level 75+ - Atomic Vault Elite", "color": 0x00f7ff, "hoist": True},
+    ]
+
+    created_count = 0
+    for role_data in level_roles:
+        role_name = role_data["name"]
+        existing_role = discord.utils.get(interaction.guild.roles, name=role_name)
+
+        if not existing_role:
+            try:
+                await interaction.guild.create_role(
+                    name=role_name,
+                    color=discord.Color(role_data["color"]),
+                    hoist=role_data["hoist"],
+                    reason="Automatic level setup by Atomic Vault Bot"
+                )
+                created_count += 1
+            except Exception as e:
+                print(f"Error creating role {role_name}: {e}")
+
+    # Flag set kar do taaki dobara na ho
+    setup_data[guild_id] = True
+    bot.save_json(setup_file, setup_data)
+
+    # Success message
+    embed = discord.Embed(
+        title="✅ Level Roles Setup Complete!",
+        description=f"Created {created_count} level roles successfully.",
+        color=0x00ff88
+    )
+    embed.add_field(
+        name="Roles Added",
+        value="\n".join([f"• {r['name']}" for r in level_roles]),
+        inline=False
+    )
+    embed.set_footer(text="Now members will get these roles on level up! 🍍")
+
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
     # --- UTILITIES ---
     embed.add_field(
