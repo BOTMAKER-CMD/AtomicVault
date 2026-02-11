@@ -57,6 +57,7 @@ service_stats_col = db["service_stats"]
 active_services_col = db["active_services"]
 config_col = db["bot_config"] # Stores Pulse & Global Settings
 # ─── BOT CLASS ─────────────────────────────────────────────
+# ─── BOT CLASS ─────────────────────────────────────────────
 class VaultBot(commands.Bot):
     def __init__(self):
         intents = discord.Intents.default()
@@ -66,11 +67,11 @@ class VaultBot(commands.Bot):
         self.afk_users = {}
 
     async def setup_hook(self):
-        # This line must be indented 8 spaces (4 for class, 4 for function)
         await self.migrate_json_to_mongo()
         self.vault_pulse.start()
         await self.tree.sync()
         print("🛰️ Vault Systems Synchronized with Cloud Database.")
+
     async def migrate_json_to_mongo(self):
         import json
         files_to_migrate = {
@@ -93,26 +94,30 @@ class VaultBot(commands.Bot):
                     os.rename(filename, f"migrated_{filename}")
                 except Exception as e:
                     print(f"❌ Error migrating {filename}: {e}")
-    # --- THE PULSE LOOP ---
+
+    # --- THE PULSE LOOP (Fixed Indentation & MongoDB) ---
     @tasks.loop(seconds=60)
-async def vault_pulse(self):
-    # Fetch from Mongo
-    config = await config_col.find_one({"_id": "pulse"}) or {}
-    if not config.get("channel_id"): return
-    
-    # ... logic to calculate total vouches ...
-    # Use: total_vouch_data = await vouch_col.count_documents({}) or similar logic
+    async def vault_pulse(self):
+        # Fetch config from MongoDB
+        config = await config_col.find_one({"_id": "pulse"}) or {}
+        if not config.get("channel_id"): 
+            return
         
         channel = self.get_channel(config["channel_id"])
         guild = self.get_guild(ALLOWED_GUILD_ID)
-        if not channel or not guild: return
+        if not channel or not guild: 
+            return
 
-        vouch_data = self.load_json(VOUCH_FILE)
-        total_vouches = sum(vouch_data.values())
-        
-        if vouch_data:
-            top_user_id = max(vouch_data, key=vouch_data.get)
-            top_contributor = f"<@{top_user_id}> ({vouch_data[top_user_id]}⭐)"
+        # Calculate Total Vouches from MongoDB
+        total_vouches = 0
+        async for doc in vouch_col.find():
+            total_vouches += doc.get("count", 0)
+
+        # Get Top Contributor from MongoDB
+        top_user_doc = await vouch_col.find().sort("count", -1).limit(1).to_list(length=1)
+        if top_user_doc:
+            top_user = top_user_doc[0]
+            top_contributor = f"<@{top_user['_id']}> ({top_user['count']}⭐)"
         else:
             top_contributor = "None yet"
 
@@ -135,19 +140,11 @@ async def vault_pulse(self):
             await msg.edit(embed=embed)
         except:
             new_msg = await channel.send(embed=embed)
-            config["last_msg_id"] = new_msg.id
-            self.save_json(PULSE_FILE, config)
-
-    def load_json(self, filename):
-        if not os.path.exists(filename):
-            with open(filename, "w") as f: json.dump({}, f)
-            return {}
-        try:
-            with open(filename, "r") as f: return json.load(f)
-        except: return {}
-
-    def save_json(self, filename, data):
-        with open(filename, "w") as f: json.dump(data, f, indent=4)
+            await config_col.update_one(
+                {"_id": "pulse"}, 
+                {"$set": {"last_msg_id": new_msg.id}}, 
+                upsert=True
+            )
 
 bot = VaultBot()
 tree = bot.tree
