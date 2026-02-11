@@ -116,7 +116,7 @@ bot = VaultBot()
 tree = bot.tree
 # In __init__ or globally
 bot.xp_file = "xp.json"
-bot.xp_data = self.load_json(self.xp_file) or {}
+bot.xp_data = bot.load_json(bot.xp_file) or {}
 
 # ─── UTILITIES ──────────────────────────────────────────
 def afk_time_ago(seconds):
