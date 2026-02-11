@@ -71,7 +71,7 @@ class VaultBot(commands.Bot):
         self.vault_pulse.start()
         await self.tree.sync()
         print("🛰️ Vault Systems Synchronized with Cloud Database.")
-async def migrate_json_to_mongo(self):
+	async def migrate_json_to_mongo(self):
     """Safely migrates local JSON data to the MongoDB Cloud."""
     import json
     
