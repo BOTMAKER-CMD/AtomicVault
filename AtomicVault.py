@@ -115,8 +115,8 @@ class VaultBot(commands.Bot):
 bot = VaultBot()
 tree = bot.tree
 # In __init__ or globally
-self.xp_file = "xp.json"
-self.xp_data = self.load_json(self.xp_file) or {}
+bot.xp_file = "xp.json"
+bot.xp_data = self.load_json(self.xp_file) or {}
 
 # ─── UTILITIES ──────────────────────────────────────────
 def afk_time_ago(seconds):
@@ -185,25 +185,7 @@ async def on_message(message):
     if message.author.bot or not message.guild:
         return
 
-    # ─── AFK logic (keeping your original) ────────────────────────────────────────
-    if message.author.id in bot.afk_users:
-        data = bot.afk_users.pop(message.author.id)
-        duration = afk_time_ago(int(time.time()) - data["time"])
-        await message.channel.send(
-            f"👋 Welcome back **{message.author.display_name}**\n⏱️ AFK for: {duration}",
-            delete_after=6
-        )
-
-    for user in message.mentions:
-        if user.id in bot.afk_users:
-            data = bot.afk_users[user.id]
-            duration = afk_time_ago(int(time.time()) - data["time"])
-            await message.channel.send(
-                f"💤 **{user.display_name} is AFK**\n📌 Reason: {data['reason']}\n⏱️ {duration}",
-                delete_after=8
-            )
-
-    # ─── XP + Leveling System ─────────────────────────────────────────────────────
+       # ─── XP + Leveling System ─────────────────────────────────────────────────────
     user_id = str(message.author.id)
 
     # XP amount
@@ -214,9 +196,9 @@ async def on_message(message):
         added_xp = random.randint(5, 15)
         boost_text = ""
 
-    current_xp = self.xp_data.get(user_id, 0)
+    current_xp = bot.xp_data.get(user_id, 0)
     new_xp = current_xp + added_xp
-    self.xp_data[user_id] = new_xp
+    bot.xp_data[user_id] = new_xp
 
     # Level calculation
     old_level = current_xp // 100
@@ -270,7 +252,7 @@ async def on_message(message):
         await message.channel.send(embed=embed)
 
     # Save XP data
-    self.save_json(self.xp_file, self.xp_data)
+    self.save_json(bot.xp_file, bot.xp_data)
 
     # Process commands & other events
     await bot.process_commands(message)
