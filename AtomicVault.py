@@ -659,57 +659,24 @@ async def help_command(interaction: discord.Interaction):
         )
 
     # --- MODERATION SECTION ---
-    if is_admin or is_mod:
-        embed.add_field(
-            name="🔨 MODERATION & ADMIN",
-            value=(
-                "> `/mute` / `/unmute` — Manage member communication.\n"
-                "> `/kick` / `/ban` — Remove threats from the Vault.\n"
-                "> `/set-pulse` — Deploy/Relocate the live Pulse dashboard.\n"
-                "> `/setup` — Auto-configure categories and channels."
-            ),
-            inline=False
+        if is_admin or is_mod:
+            embed.add_field(
+                name="🔨 MODERATION & ADMIN",
+                value=(
+                    "> `/mute` / `/unmute` — Manage member communication.\n"
+                    "> `/kick` / `/ban` — Remove threats from the Vault.\n"
+                    "> `/set-pulse` — Deploy/Relocate the live Pulse dashboard.\n"
+                    "> `/setup` — Auto-configure categories and channels."
+                ),
+                inline=False
+            )
 
+        embed.set_footer(text=f"User: {interaction.user.display_name} • Aura: W Code Active")
+        
+        if self.user.display_avatar:
+            embed.set_thumbnail(url=self.user.display_avatar.url)
 
-@tree.command(name="dailyspin", description="Spin the daily wheel!")
-@app_commands.checks.cooldown(1, 86400)
-async def dailyspin(interaction: discord.Interaction):
-    rewards = ["Kitsune luck! 🍁", "Leopard speed 🐆", "Dough awakening 🍩", "Just a Banana 🍌"]
-    result = random.choice(rewards)
-    embed = discord.Embed(title="🎰 Daily Spin!", description=f"{interaction.user.mention}: **{result}**", color=0x00f7ff)
-    await interaction.response.send_message(embed=embed)
-
-@tree.command(name="roast", description="Roast someone")
-async def roast(interaction: discord.Interaction, target: discord.Member):
-    if target == interaction.user:
-        return await interaction.response.send_message("Don't roast yourself bro 😂", ephemeral=True)
-    roasts = [f"{target.mention} is a Buddha spammer 🤡", f"{target.mention} lost to a lvl 1 pirate 💀"]
-    await interaction.response.send_message(random.choice(roasts))
-
-# ─── FINAL COMMANDS ─────────────────────────────────────────
-
-@tree.command(name="help", description="Access the Atomic Vault directory")
-async def help_command(interaction: discord.Interaction):
-    is_staff = interaction.user.id in CORE_TEAM
-    embed = discord.Embed(
-        title="🛡️ ATOMIC VAULT | SYSTEM DIRECTORY",
-        description="*Welcome to the Vault. Systems are currently OPERATIONAL.*",
-        color=EMBED_COLOR
-    )
-
-    embed.add_field(
-        name="🛰️ UTILITIES", 
-        value="> `!afk [reason]` — Set status\n> `/ping` — Check latency", 
-        inline=False
-    )
-
-    embed.set_footer(text=f"User: {interaction.user.display_name} • Aura: W Code Active")
-    
-    if bot.user.display_avatar:
-        embed.set_thumbnail(url=bot.user.display_avatar.url)
-
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 # ─── FINAL STARTUP ──────────────────────────────────────────
 
 if __name__ == "__main__":
