@@ -1,3 +1,4 @@
+
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
@@ -332,23 +333,32 @@ async def levelsboard(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)@tree.command(name="ping", description="Check bot latency")
 async def slash_ping(interaction: discord.Interaction):
     await interaction.response.send_message(f"🏓 Pong `{round(bot.latency * 1000)}ms`", ephemeral=True)
-
 @tree.command(name="vouch", description="Give a member a Vault Vouch")
 async def vouch(interaction: discord.Interaction, target: discord.Member, reason: str):
     if target.id == interaction.user.id:
         return await interaction.response.send_message("❌ You cannot vouch for yourself.", ephemeral=True)
 
-    data = bot.load_json(VOUCH_FILE)
-    data[str(target.id)] = data.get(str(target.id), 0) + 1
-    total = data[str(target.id)]
-    bot.save_json(VOUCH_FILE, data)
+    # 1. Update/Increment vouch count in MongoDB
+    target_id = str(target.id)
+    result = await vouch_col.find_one_and_update(
+        {"_id": target_id},
+        {"$inc": {"count": 1}},
+        upsert=True,
+        return_document=True
+    )
+    total = result.get("count", 1)
 
-    # Clearance Logic
-    if target.id in CORE_TEAM: clearance = f"⭐ {CORE_TEAM[target.id]}"
-    elif total >= 25: clearance = "💎 ELITE"
-    elif total >= 10: clearance = "✅ TRUSTED"
-    else: clearance = "👤 MEMBER"
+    # 2. Clearance Logic
+    if target.id in CORE_TEAM: 
+        clearance = f"⭐ {CORE_TEAM[target.id]}"
+    elif total >= 25: 
+        clearance = "💎 ELITE"
+    elif total >= 10: 
+        clearance = "✅ TRUSTED"
+    else: 
+        clearance = "👤 MEMBER"
 
+    # 3. Create Embed
     public_embed = discord.Embed(title="💠 NEW VAULT VOUCH", color=0x00ff00)
     public_embed.set_thumbnail(url=target.display_avatar.url)
     public_embed.add_field(name="👤 Recipient", value=target.mention, inline=True)
@@ -358,16 +368,22 @@ async def vouch(interaction: discord.Interaction, target: discord.Member, reason
     public_embed.add_field(name="🛰️ Clearance", value=f"`{clearance}`", inline=True)
     public_embed.set_footer(text="Atomic Vault Security System")
     
+    # 4. Send to Vouch Channel
     v_chan = bot.get_channel(VOUCH_CHANNEL_ID)
-    if v_chan: await v_chan.send(embed=public_embed)
+    if v_chan: 
+        await v_chan.send(embed=public_embed)
     
-    config = bot.load_json(PULSE_FILE)
-    config["recent_action"] = f"⭐ {interaction.user.name} vouched {target.name}"
-    bot.save_json(PULSE_FILE, config)
+    # 5. Update Recent Activity in MongoDB
+    await config_col.update_one(
+        {"_id": "pulse"},
+        {"$set": {"recent_action": f"⭐ {interaction.user.name} vouched {target.name}"}},
+        upsert=True
+    )
+    
+    # Refresh the pulse dashboard
     bot.loop.create_task(bot.vault_pulse())
 
     await interaction.response.send_message(f"✅ Vouch posted in <#{VOUCH_CHANNEL_ID}>", ephemeral=True)
-
 @tree.command(name="stats", description="Check profile stats")
 async def stats(interaction: discord.Interaction, member: discord.Member = None):
     target = member or interaction.user
@@ -654,113 +670,129 @@ async def help_command(interaction: discord.Interaction):
             ),
             inline=False
         )
-@tree.command(name="dailyspin", description="Spin the daily wheel for a lucky reward!")
-@app_commands.checks.cooldown(1, 86400)  # once per day
-async def dailyspin(interaction: discord.Interaction):
-    rewards = [
-        "Kitsune luck today! God tier 🍁",
-        "Leopard speed boost activated 🐆",
-        "Dough awakening incoming 🍩",
-        "Just a Banana... try again tomorrow 🍌😂",
-        "Venom pull – solid win 🐍",
-        "Mystery reward: Ask staff for a free raid carry! 👀"
-    ]
-    result = random.choice(rewards)
+# ─── MODERATION ──────────────────────────────────────────
+@tree.command(name="ban", description="Ban a member")
+@app_commands.checks.has_permissions(ban_members=True)
+async def ban(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason"):
+    if member.id == interaction.user.id: 
+        return await interaction.response.send_message("❌ Cannot ban self.", ephemeral=True)
+    await member.ban(reason=reason)
+    await interaction.response.send_message(f"🔨 Banned {member}")
+
+@tree.command(name="kick", description="Kick a member")
+@app_commands.checks.has_permissions(kick_members=True)
+async def kick(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason"):
+    await member.kick(reason=reason)
+    await interaction.response.send_message(f"👢 Kicked {member}")
+
+@tree.command(name="unban", description="Unban a user by ID")
+@app_commands.checks.has_permissions(ban_members=True)
+async def unban(interaction: discord.Interaction, user_id: str, reason: str = "No reason"):
+    user = await bot.fetch_user(int(user_id))
+    await interaction.guild.unban(user, reason=reason)
+    await interaction.response.send_message(f"✅ Unbanned {user.name}")
+
+@tree.command(name="mute", description="Mute a member")
+@app_commands.checks.has_permissions(moderate_members=True)
+async def mute(interaction: discord.Interaction, member: discord.Member, duration: str, reason: str = "No reason"):
+    delta = parse_duration(duration)
+    if not delta: 
+        return await interaction.response.send_message("❌ Use 10s / 5m / 2h / 1d", ephemeral=True)
+    await member.timeout(delta, reason=reason)
+    await interaction.response.send_message(f"🔇 Muted {member} for {duration}")
+
+@tree.command(name="unmute", description="Unmute a member")
+@app_commands.checks.has_permissions(moderate_members=True)
+async def unmute(interaction: discord.Interaction, member: discord.Member):
+    await member.timeout(None)
+    await interaction.response.send_message(f"🔊 Unmuted {member}")
+
+@tree.command(name="set-pulse", description="Deploy the Atomic Pulse dashboard")
+@app_commands.checks.has_permissions(administrator=True)
+async def set_pulse(interaction: discord.Interaction):
+    # Fixed to use MongoDB instead of load_json
+    await config_col.update_one(
+        {"_id": "pulse"},
+        {"$set": {
+            "channel_id": interaction.channel_id,
+            "last_msg_id": None,
+            "recent_action": f"Vault Pulse Initialized by {interaction.user.name}"
+        }},
+        upsert=True
+    )
+    bot.loop.create_task(bot.vault_pulse())
+    await interaction.response.send_message("💠 Vault Link Established.", ephemeral=True)
+
+@tree.command(name="my-service", description="Customer: View your active service details and OTPs")
+async def my_service(interaction: discord.Interaction):
+    job = await active_services_col.find_one({"_id": str(interaction.user.id)})
     
-    embed = discord.Embed(title="🎰 Daily Spin!", color=0x00f7ff)
-    embed.description = f"{interaction.user.mention} spun the wheel...\n**{result}**"
-    embed.set_footer(text="Come back tomorrow for another spin! ⏳")
+    if not job:
+        return await interaction.response.send_message("🛰️ **No active services found** linked to your ID.", ephemeral=True)
     
+    embed = discord.Embed(title="💠 YOUR ACTIVE SERVICE", color=EMBED_COLOR)
+    embed.add_field(name="🛠️ Operation", value=f"`{job['name']}`", inline=False)
+    embed.add_field(name="👤 Assigned Staff", value=f"`{job['staff']}`", inline=True)
+    embed.add_field(name="🛰️ Status", value=f"`{job['status']}`", inline=True)
+    embed.add_field(name="🔑 START OTP", value=f"||{job['s_otp']}||", inline=True)
+    embed.add_field(name="🔒 END OTP", value=f"||{job['e_otp']}||", inline=True)
+    embed.add_field(name="🚫 CANCEL OTP", value=f"||{job['c_otp']}||", inline=True)
+    embed.set_footer(text="Keep these codes confidential. Click to reveal.")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@tree.command(name="help", description="Access the Atomic Vault command directory")
+async def help_command(interaction: discord.Interaction):
+    is_staff = interaction.user.id in CORE_TEAM
+    is_admin = interaction.user.guild_permissions.administrator
+    is_mod = interaction.user.guild_permissions.moderate_members
+
+    embed = discord.Embed(
+        title="🛡️ ATOMIC VAULT | SYSTEM DIRECTORY",
+        description="*Welcome to the Vault. Systems are currently OPERATIONAL.*",
+        color=EMBED_COLOR
+    )
+    embed.add_field(
+        name="🔑 MEMBER OPERATIONS",
+        value="> `/my-service` — View your active OTPs.\n> `/stats` — Check profile.\n> `/vouch` — Vouch members.",
+        inline=False
+    )
+
+    if is_staff:
+        embed.add_field(
+            name="🛠️ STAFF OPERATIONS",
+            value="> `/create-service`\n> `/start-service`\n> `/complete-service`\n> `/view-active`",
+            inline=False
+        )
+    
+    if is_admin or is_mod:
+        embed.add_field(
+            name="🔨 MODERATION & ADMIN",
+            value="> `/mute` / `/unmute`\n> `/kick` / `/ban`\n> `/set-pulse`",
+            inline=False
+        )
     await interaction.response.send_message(embed=embed)
 
+@tree.command(name="dailyspin", description="Spin the daily wheel!")
+@app_commands.checks.cooldown(1, 86400)
+async def dailyspin(interaction: discord.Interaction):
+    rewards = ["Kitsune luck! 🍁", "Leopard speed 🐆", "Dough awakening 🍩", "Just a Banana 🍌"]
+    result = random.choice(rewards)
+    embed = discord.Embed(title="🎰 Daily Spin!", description=f"{interaction.user.mention}: **{result}**", color=0x00f7ff)
+    await interaction.response.send_message(embed=embed)
 
-@tree.command(name="roast", description="Roast someone in Blox Fruits style")
+@tree.command(name="roast", description="Roast someone")
 async def roast(interaction: discord.Interaction, target: discord.Member):
     if target == interaction.user:
         return await interaction.response.send_message("Don't roast yourself bro 😂", ephemeral=True)
-    
-    roasts = [
-        f"{target.mention} is still using Buddha and calls it 'grinding' 😂",
-        f"{target.mention}'s main fruit is Banana – slips every raid 🍌",
-        f"{target.mention} saw Mirage and thought it was Buddha spawn 🤡",
-        f"{target.mention} got Dough but still not awakened – certified noob",
-        f"{target.mention}'s bounty is 0 because he dies only at marine spawns 😭"
-    ]
-    roast_line = random.choice(roasts)
-    
-    await interaction.response.send_message(roast_line)
-@tree.command(name="setuplevels", description="Setup all level roles automatically (Staff only)")
-async def setuplevels(interaction: discord.Interaction):
-    # Sirf core team/staff use kar sake
-    if interaction.user.id not in CORE_TEAM:
-        return await interaction.response.send_message(
-            "❌ This command is for staff/core team only!",
-            ephemeral=True
-        )
+    roasts = [f"{target.mention} is a Buddha spammer 🤡", f"{target.mention} lost to a lvl 1 pirate 💀"]
+    await interaction.response.send_message(random.choice(roasts))
 
-    # Check if already set up (ek simple flag use karte hain)
-    setup_file = "level_setup.json"
-    setup_data = bot.load_json(setup_file) or {}
-
-    guild_id = str(interaction.guild.id)
-    if setup_data.get(guild_id, False):
-        return await interaction.response.send_message(
-            "✅ Levels already set up! No need to run again.",
-            ephemeral=True
-        )
-
-    # Level roles list with names, colors, hoist
-    level_roles = [
-        {"level": 1,  "name": "Level 1 - Newbie Adventurer",   "color": 0xcccccc, "hoist": False},
-        {"level": 5,  "name": "Level 5 - Sea Explorer",         "color": 0x00ff88, "hoist": True},
-        {"level": 10, "name": "Level 10 - Fruit Hunter",        "color": 0x00aaff, "hoist": True},
-        {"level": 15, "name": "Level 15 - Raid Participant",    "color": 0xaa55ff, "hoist": True},
-        {"level": 20, "name": "Level 20 - Awakened Grinder",    "color": 0xffd700, "hoist": True},
-        {"level": 25, "name": "Level 25 - Bounty Chaser",       "color": 0xff8800, "hoist": True},
-        {"level": 30, "name": "Level 30 - Sea Beast Slayer",    "color": 0xff4444, "hoist": True},
-        {"level": 40, "name": "Level 40 - Mirage Hunter",       "color": 0x00ffff, "hoist": True},
-        {"level": 50, "name": "Level 50 - Legendary Pirate",    "color": 0xff00aa, "hoist": True},
-        {"level": 60, "name": "Level 60 - God of the Seas",     "color": 0xffffff, "hoist": True},
-        {"level": 75, "name": "Level 75+ - Atomic Vault Elite", "color": 0x00f7ff, "hoist": True},
-    ]
-
-    created_count = 0
-    for role_data in level_roles:
-        role_name = role_data["name"]
-        existing_role = discord.utils.get(interaction.guild.roles, name=role_name)
-
-        if not existing_role:
-            try:
-                await interaction.guild.create_role(
-                    name=role_name,
-                    color=discord.Color(role_data["color"]),
-                    hoist=role_data["hoist"],
-                    reason="Automatic level setup by Atomic Vault Bot"
-                )
-                created_count += 1
-            except Exception as e:
-                print(f"Error creating role {role_name}: {e}")
-
-    # Flag set kar do taaki dobara na ho
-    setup_data[guild_id] = True
-    bot.save_json(setup_file, setup_data)
-
-    # Success message
-    embed = discord.Embed(
-        title="✅ Level Roles Setup Complete!",
-        description=f"Created {created_count} level roles successfully.",
-        color=0x00ff88
-    )
-    embed.add_field(
-        name="Roles Added",
-        value="\n".join([f"• {r['name']}" for r in level_roles]),
-        inline=False
-    )
-    embed.set_footer(text="Now members will get these roles on level up! 🍍")
-
-    await interaction.response.send_message(embed=embed, ephemeral=False)
-
-    # --- UTILITIES ---
+# ─── FINAL STARTUP ──────────────────────────────────────────
+keep_alive()
+try:
+    bot.run(TOKEN)
+except Exception as e:
+    print(f"❌ Critical Startup Error: {e}")    # --- UTILITIES ---
     embed.add_field(
         name="🛰️ UTILITIES", 
         value="`!afk [reason]` — Set status\n`/ping` — Check latency", 
