@@ -787,37 +787,43 @@ async def roast(interaction: discord.Interaction, target: discord.Member):
     roasts = [f"{target.mention} is a Buddha spammer 🤡", f"{target.mention} lost to a lvl 1 pirate 💀"]
     await interaction.response.send_message(random.choice(roasts))
 
-# ─── FINAL STARTUP ──────────────────────────────────────────
-keep_alive()
-try:
-    bot.run(TOKEN)
-except Exception as e:
-    print(f"❌ Critical Startup Error: {e}")    # --- UTILITIES ---
-    embed.add_field(
-        name="🛰️ UTILITIES", 
-        value="`!afk [reason]` — Set status\n`/ping` — Check latency", 
-        inline=True
+# ─── FINAL COMMANDS ─────────────────────────────────────────
+
+@tree.command(name="help", description="Access the Atomic Vault directory")
+async def help_command(interaction: discord.Interaction):
+    is_staff = interaction.user.id in CORE_TEAM
+    embed = discord.Embed(
+        title="🛡️ ATOMIC VAULT | SYSTEM DIRECTORY",
+        description="*Welcome to the Vault. Systems are currently OPERATIONAL.*",
+        color=EMBED_COLOR
     )
 
-   # Ensure this is indented inside your command function
+    embed.add_field(
+        name="🛰️ UTILITIES", 
+        value="> `!afk [reason]` — Set status\n> `/ping` — Check latency", 
+        inline=False
+    )
+
     embed.set_footer(text=f"User: {interaction.user.display_name} • Aura: W Code Active")
     
     if bot.user.display_avatar:
         embed.set_thumbnail(url=bot.user.display_avatar.url)
 
-    # Use follow_up if the interaction was already deferred, 
-    # otherwise send_message is correct.
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# --- CRITICAL STARTUP SEQUENCE (Outside of any class or function) ---
-# This part must be at the very bottom of your file with ZERO spaces at the start of the line.
+# ─── FINAL STARTUP ──────────────────────────────────────────
 
 if __name__ == "__main__":
-    # Start the Flask web server for UptimeRobot/Render
+    # 1. Start the Flask web server first
+    print("🌐 Initializing Keep-Alive...")
     keep_alive()
     
-    # Start the Discord Bot
+    # 2. Start the Discord Bot
+    print("🤖 Connecting to Discord...")
     try:
-        bot.run(TOKEN)
+        if not TOKEN:
+            print("❌ TOKEN MISSING: Check your Render Environment Variables!")
+        else:
+            bot.run(TOKEN)
     except Exception as e:
-        print(f"❌ BOT CRASHED ON STARTUP: {e}")
+        print(f"❌ CRITICAL ERROR: {e}")
