@@ -799,10 +799,25 @@ except Exception as e:
         inline=True
     )
 
+   # Ensure this is indented inside your command function
     embed.set_footer(text=f"User: {interaction.user.display_name} • Aura: W Code Active")
-    if bot.user.avatar:
-        embed.set_thumbnail(url=bot.user.avatar.url)
+    
+    if bot.user.display_avatar:
+        embed.set_thumbnail(url=bot.user.display_avatar.url)
 
+    # Use follow_up if the interaction was already deferred, 
+    # otherwise send_message is correct.
     await interaction.response.send_message(embed=embed, ephemeral=True)
-keep_alive()
-bot.run(TOKEN)
+
+# --- CRITICAL STARTUP SEQUENCE (Outside of any class or function) ---
+# This part must be at the very bottom of your file with ZERO spaces at the start of the line.
+
+if __name__ == "__main__":
+    # Start the Flask web server for UptimeRobot/Render
+    keep_alive()
+    
+    # Start the Discord Bot
+    try:
+        bot.run(TOKEN)
+    except Exception as e:
+        print(f"❌ BOT CRASHED ON STARTUP: {e}")
